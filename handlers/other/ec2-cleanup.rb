@@ -83,6 +83,7 @@ require 'rubygems' if RUBY_VERSION < '1.9.0'
 require 'sensu-handler'
 require 'aws-sdk-core'
 require 'json'
+require 'open-uri'
 
 class Ec2Node < Sensu::Handler
   def filter; end
@@ -113,7 +114,7 @@ class Ec2Node < Sensu::Handler
   end
 
   def ec2
-    region = JSON.parse(`curl -s http://169.254.169.254/latest/dynamic/instance-identity/document`)['region']
+    region = JSON.parse(open('http://169.254.169.254/latest/dynamic/instance-identity/document').read)['region']
     @ec2 ||= begin
       Aws::EC2::Client.new(region: region)
     end
