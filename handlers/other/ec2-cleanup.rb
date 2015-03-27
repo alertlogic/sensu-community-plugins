@@ -103,7 +103,6 @@ class Ec2Node < Sensu::Handler
   end
 
   def ec2_node_exists?
-    states = acquire_valid_states
     instance_ids = ec2.describe_instances(filters: [ { name: "instance-state-name", values: acquire_valid_states } ]).reservations.collect { |r| r.instances.map(&:instance_id) }.flatten
     # Strip the service name off so we can find it in EC2
     @event['client']['ec2-name'] = @event['client']['name'].scan(/-(i-\w+)$/)[0][0]
