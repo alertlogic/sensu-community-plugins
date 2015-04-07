@@ -8,10 +8,9 @@ begin
     zk_socket.print('ruok\n')
     zk_socket.read
   end
-
-  rescue Timeout::Error
-    puts "CRITICAL: Zookeeper health check timed out."
-    exit 2
+rescue Timeout::Error
+  puts "CRITICAL: Zookeeper health check timed out."
+  exit 2
 end
 
 if ( response == 'imok' )
