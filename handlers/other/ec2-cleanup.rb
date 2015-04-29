@@ -93,7 +93,7 @@ class Ec2Node < Sensu::Handler
     unless ec2_node_exists? # rubocop:disable UnlessElse
       delete_sensu_client!
     else
-      puts "[EC2 Node] #{@event['client']['name']} appears to exist in EC2"
+      puts "[EC2 Node] #{@event['client']['name']} exists in EC2"
     end
   end
 
