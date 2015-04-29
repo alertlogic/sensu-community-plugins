@@ -34,7 +34,7 @@ class Pagerduty < Sensu::Handler
     else
       api_key = settings[config[:json_config]]['api_key']
     end
-    if api_key.length < 1
+    if api_key.empty?
       print "No api_key specified.  Skipping PagerDuty notification."
       exit 0
     end
