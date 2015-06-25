@@ -33,7 +33,7 @@
 
 require 'rubygems' if RUBY_VERSION < '1.9.0'
 require 'sensu-plugin/check/cli'
-require 'aws-sdk-v1'
+require 'aws-sdk'
 require 'time'
 
 class CheckDynamoDB < Sensu::Plugin::Check::CLI
@@ -52,11 +52,11 @@ class CheckDynamoDB < Sensu::Plugin::Check::CLI
          long:        '--region REGION',
          description: 'AWS region'
 
-  option :table_names,
-         short:       '-t N',
-         long:        '--table-names NAMES',
-         proc:        proc { |a| a.split(/[,;]\s*/) },
-         description: 'Table names to check. Separated by , or ;. If not specified, check all tables'
+  option :app_name,
+         short:       '-a N',
+         long:        '--app-name NAME',
+         description: 'Alert Logic application name to check DynamoDB tables for.  Tables must be named <region>.<stackname>.<dev/ops>.<app_name>.<table_name>',
+         required:    true
 
   option :end_time,
          short:       '-t T',
@@ -98,27 +98,48 @@ class CheckDynamoDB < Sensu::Plugin::Check::CLI
   def aws_config
     hash = {}
     hash.update access_key_id: config[:access_key_id], secret_access_key: config[:secret_access_key] if config[:access_key_id] && config[:secret_access_key]
+    hash.update region: region
     hash.update region: config[:region] if config[:region]
+    hash.update retry_limit: 50
     hash
   end
 
   def dynamo_db
-    @dynamo_db ||= AWS::DynamoDB.new aws_config
+    @dynamo_db ||= Aws::DynamoDB::Client.new aws_config
   end
 
   def cloud_watch
-    @cloud_watch ||= AWS::CloudWatch.new aws_config
+    @cloud_watch ||= Aws::CloudWatch::Client.new aws_config
+  end
+
+  def region
+    File.read("/var/alertlogic/data/aws-region").strip
+  end
+
+  def base_stack_name
+    File.read("/var/alertlogic/data/base-stack-name").strip
   end
 
   def tables
     return @tables if @tables
-    @tables = dynamo_db.tables.to_a
-    @tables.select! { |table| config[:table_names].include? table.name } if config[:table_names]
+    @tables = dynamo_db.list_tables.table_names.to_a
+    @tables.select! do |table_name|
+      ddb_region, ddb_stack, _, ddb_app_name, _ = table_name.split('.')
+      ddb_region == region && ddb_stack == base_stack_name && ddb_app_name == config[:app_name]
+    end
     @tables
   end
 
   def cloud_watch_metric(metric_name, table_name)
-    cloud_watch.metrics.with_namespace('AWS/DynamoDB').with_metric_name(metric_name).with_dimensions(name: 'TableName', value: table_name).first
+    cloud_watch.get_metric_statistics(
+      namespace:   'AWS/DynamoDB',
+      metric_name: metric_name,
+      start_time:  config[:end_time] - config[:period],
+      end_time:    config[:end_time],
+      period:      config[:period],
+      statistics:  [config[:statistics].to_s.capitalize],
+      dimensions:  [ { name: 'TableName', value: table_name } ]
+    )
   end
 
   def statistics_options
@@ -131,12 +152,18 @@ class CheckDynamoDB < Sensu::Plugin::Check::CLI
   end
 
   def latest_value(metric)
-    metric.statistics(statistics_options.merge unit: 'Count').datapoints.sort_by { |datapoint| datapoint[:timestamp] }.last[config[:statistics]]
+    metric.datapoints.sort_by { |datapoint| datapoint[:timestamp] }.last[config[:statistics]]
   end
 
   def flag_alert(severity, message)
     @severities[severity] = true
     @message += message
+  end
+
+  def capacity_units(table_name, r_or_w)
+    puts "Table: #{table_name}, #{r_or_w}"
+    puts @dynamo_db.describe_table(:table_name => table_name).table.provisioned_throughput.send("#{r_or_w}_capacity_units")
+    @dynamo_db.describe_table(:table_name => table_name).table.provisioned_throughput.send("#{r_or_w}_capacity_units")
   end
 
   def check_capacity(table)
@@ -148,7 +175,7 @@ class CheckDynamoDB < Sensu::Plugin::Check::CLI
                       rescue
                         0
                       end
-      percentage    = metric_value / table.send("#{r_or_w}_capacity_units").to_f * 100
+      percentage    = metric_value / table.provisioned_throughput.send("#{r_or_w}_capacity_units").to_f * 100
 
       @severities.keys.each do |severity|
         threshold = config[:"#{severity}_over"]
@@ -167,7 +194,7 @@ class CheckDynamoDB < Sensu::Plugin::Check::CLI
       warning:  false
     }
 
-    tables.each { |table| check_capacity table }
+    tables.each { |table| check_capacity Aws::DynamoDB::Table.new(table, region: region, retry_limit: 50) }
 
     @message += "; (#{config[:statistics].to_s.capitalize} within #{config[:period]} seconds "
     @message += "between #{config[:end_time] - config[:period]} to #{config[:end_time]})"
