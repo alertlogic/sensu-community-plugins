@@ -29,7 +29,7 @@ class Pagerduty < Sensu::Handler
   end
 
   def handle
-    if @event['check']['pager_team']
+    if @event['check']['pager_team'] && defined? settings[config[:json_config]][@event['check']['pager_team']]['api_key']
       api_key = settings[config[:json_config]][@event['check']['pager_team']]['api_key']
     else
       api_key = settings[config[:json_config]]['api_key']
