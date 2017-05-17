@@ -215,7 +215,7 @@ class Ec2Node < Sensu::Handler
         # Return true is instance state and instance reason is valid
         instance_states.include?(instance_state) && instance_reasons.include?(instance_state_reason)
       end
-    rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+    rescue Aws::EC2::Errors::InvalidInstanceIDNotFound, Aws::EC2::Errors::InvalidInstanceIDMalformed
       true
     end
   end
