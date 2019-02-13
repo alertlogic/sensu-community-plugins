@@ -1,18 +1,34 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
+
 #
-# Check RabbitMQ messages
+# Check RabbitMQ Messages
 # ===
 #
+# DESCRIPTION:
+# This plugin checks the total number of messages queued on the RabbitMQ server
+#
+# PLATFORMS:
+#   Linux, BSD, Solaris
+#
+# DEPENDENCIES:
+#   RabbitMQ rabbitmq_management plugin
+#   gem: sensu-plugin
+#   gem: carrot-top
+#
+# LICENSE:
 # Copyright 2012 Evan Hazlett <ejhazlett@gmail.com>
+# Copyright 2015 Tim Smith <tim@cozy.co> and Cozy Services Ltd.
 #
 # Released under the same terms as Sensu (the MIT license); see LICENSE
 # for details.
 
-require 'rubygems' if RUBY_VERSION < '1.9.0'
 require 'sensu-plugin/check/cli'
 require 'socket'
 require 'carrot-top'
+require 'inifile'
 
+# main plugin class
 class CheckRabbitMQMessages < Sensu::Plugin::Check::CLI
   option :host,
          description: 'RabbitMQ management API host',
@@ -25,9 +41,9 @@ class CheckRabbitMQMessages < Sensu::Plugin::Check::CLI
          proc: proc(&:to_i),
          default: 15_672
 
-  option :user,
+  option :username,
          description: 'RabbitMQ management API user',
-         long: '--user USER',
+         long: '--username USER',
          default: 'guest'
 
   option :password,
@@ -53,28 +69,84 @@ class CheckRabbitMQMessages < Sensu::Plugin::Check::CLI
          description: 'CRITICAL message count threshold',
          default: 500
 
+  option :queuelevel,
+         short: '-q',
+         long: '--queuelevel',
+         description: 'Monitors that no individual queue is above the thresholds specified'
+
+  option :excluded,
+         short: '-e queue_name',
+         long: '--excludedqueues queue_name',
+         description: 'Comma separated list of queues to exclude when using queue level monitoring',
+         proc: proc { |q| q.split(',') },
+         default: []
+
+  option :ini,
+         description: 'Configuration ini file',
+         short: '-i',
+         long: '--ini VALUE'
+
+  def generate_message(status_hash)
+    message = []
+    status_hash.each_pair do |k, v|
+      message << "#{k}: #{v}"
+    end
+    message.join(', ')
+  end
+
   def acquire_rabbitmq_info
     begin
+      if config[:ini]
+        ini = IniFile.load(config[:ini])
+        section = ini['auth']
+        username = section['username']
+        password = section['password']
+      else
+        username = config[:username]
+        password = config[:password]
+      end
+
       rabbitmq_info = CarrotTop.new(
         host: config[:host],
         port: config[:port],
-        user: config[:user],
-        password: config[:password],
+        user: username,
+        password: password,
         ssl: config[:ssl]
       )
-    rescue
-      warning 'could not get rabbitmq info'
+    rescue StandardError
+      warning 'Could not connect to rabbitmq'
     end
     rabbitmq_info
   end
 
   def run
     rabbitmq = acquire_rabbitmq_info
-    overview = rabbitmq.overview
-    total = overview['queue_totals']['messages']
-    message "#{total}"
-    critical if total > config[:critical].to_i
-    warning if total > config[:warn].to_i
+
+    # monitor counts in each queue or monitor the total number of messages in the system
+    if config[:queuelevel]
+      warn_queues = {}
+      crit_queues = {}
+      rabbitmq.queues.each do |queue|
+        next if config[:excluded].include?(queue['name'])
+        queue['messages'] ||= 0
+        if queue['messages'] >= config[:critical].to_i
+          crit_queues[(queue['name']).to_s] = queue['messages']
+          next
+        end
+        if queue['messages'] >= config[:warn].to_i
+          warn_queues[(queue['name']).to_s] = queue['messages']
+          next
+        end
+      end
+      message crit_queues.empty? ? generate_message(warn_queues) : generate_message(crit_queues)
+      critical unless crit_queues.empty?
+      warning unless warn_queues.empty?
+    else
+      total = rabbitmq.overview['queue_totals']['messages']
+      message total.to_s
+      critical if total > config[:critical].to_i
+      warning if total > config[:warn].to_i
+    end
     ok
   end
 end

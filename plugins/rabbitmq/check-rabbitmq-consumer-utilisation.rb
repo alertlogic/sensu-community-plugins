@@ -1,11 +1,16 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Check RabbitMQ consumers
+# Check RabbitMQ consumer utilisation
 # ===
 #
 # DESCRIPTION:
-# This plugin checks the number of consumers on the RabbitMQ server
+# This plugin checks the consumer utilisation percentage.
+# The fraction of time in which the queue is able to immediately deliver
+# messages to consumer. If this number drops in percentage this may result
+# in slower message delivery and indicate issues with the queue.
+#
+# Seeded from check-rabbitmq-consumers.rb
 #
 # PLATFORMS:
 #   Linux, BSD, Solaris
@@ -27,7 +32,7 @@ require 'sensu-plugins-rabbitmq'
 require 'sensu-plugins-rabbitmq/check'
 
 # main plugin class
-class CheckRabbitMQConsumers < Sensu::Plugin::RabbitMQ::Check
+class CheckRabbitMQConsumerUtilisation < Sensu::Plugin::RabbitMQ::Check
   option :regex,
          description: 'Treat the --queue flag as a regular expression.',
          long: '--regex',
@@ -43,18 +48,18 @@ class CheckRabbitMQConsumers < Sensu::Plugin::RabbitMQ::Check
          long: '--exclude queue_name'
 
   option :warn,
-         short: '-w NUM_CONSUMERS',
-         long: '--warn NUM_CONSUMERS',
-         proc: proc(&:to_i),
-         description: 'WARNING consumer count threshold',
-         default: 5
+         short: '-w CONSUMER_UTILISATION',
+         long: '--warn CONSUMER_UTILISATION',
+         proc: proc(&:to_f),
+         description: 'WARNING consumer utilisation threshold',
+         default: 0.9
 
   option :critical,
-         short: '-c NUM_CONSUMERS',
-         long: '--critical NUM_CONSUMERS',
-         description: 'CRITICAL consumer count threshold',
-         proc: proc(&:to_i),
-         default: 2
+         short: '-c CONSUMER_UTILISATION',
+         long: '--critical CONSUMER_UTILISATION',
+         description: 'CRITICAL consumer utilisation threshold',
+         proc: proc(&:to_f),
+         default: 0.5
 
   def return_condition(missing, critical, warning)
     if critical.count > 0 || missing.count > 0
@@ -70,9 +75,9 @@ class CheckRabbitMQConsumers < Sensu::Plugin::RabbitMQ::Check
   end
 
   def run
+    # create arrays to hold failures
     queue_list = queue_list_builder(config[:queue])
     exclude_list = queue_list_builder(config[:exclude])
-    # create arrays to hold failures
     missing = if config[:regex]
                 []
               else
@@ -97,9 +102,9 @@ class CheckRabbitMQConsumers < Sensu::Plugin::RabbitMQ::Check
           next if exclude_list.include?(queue['name'])
         end
         missing.delete(queue['name'])
-        consumers = queue['consumers'] || 0
-        critical.push("#{queue['name']}:#{queue['consumers']}-Consumers") if consumers <= config[:critical]
-        warn.push("#{queue['name']}:#{queue['consumers']}-Consumers") if consumers <= config[:warn]
+        consumer_util = queue['consumer_utilisation'] || 0
+        critical.push("#{queue['name']}:#{consumer_util.round(2) * 100}%") if consumer_util <= config[:critical]
+        warn.push("#{queue['name']}:#{consumer_util.round(2) * 100}%") if consumer_util <= config[:warn]
       end
     rescue StandardError
       critical 'Could not find any queue, check rabbitmq server'
