@@ -1,21 +1,35 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
+
 #
 # RabbitMQ check alive plugin
 # ===
 #
+# DESCRIPTION:
 # This plugin checks if RabbitMQ server is alive and responding to STOMP
 # requests.
 #
-# Copyright 2014 Adam Ashley
 # Based on rabbitmq-amqp-alive by Milos Gajdos
+#
+# PLATFORMS:
+#   Linux, BSD, Solaris
+#
+# DEPENDENCIES:
+#   RabbitMQ rabbitmq_management plugin
+#   gem: sensu-plugin
+#   gem: stomp
+#
+# LICENSE:
+# Copyright 2014 Adam Ashley
 #
 # Released under the same terms as Sensu (the MIT license); see LICENSE
 # for details.
 
-require 'rubygems' if RUBY_VERSION < '1.9.0'
 require 'sensu-plugin/check/cli'
 require 'stomp'
+require 'inifile'
 
+# main plugin class
 class CheckRabbitStomp < Sensu::Plugin::Check::CLI
   option :host,
          description: 'RabbitMQ host',
@@ -53,6 +67,11 @@ class CheckRabbitStomp < Sensu::Plugin::Check::CLI
          long: '--queue QUEUE',
          default: 'aliveness-test'
 
+  option :ini,
+         description: 'Configuration ini file',
+         short: '-i',
+         long: '--ini VALUE'
+
   def run
     res = vhost_alive?
 
@@ -66,11 +85,21 @@ class CheckRabbitStomp < Sensu::Plugin::Check::CLI
   end
 
   def vhost_alive?
+    if config[:ini]
+      ini = IniFile.load(config[:ini])
+      section = ini['auth']
+      username = section['username']
+      password = section['password']
+    else
+      username = config[:username]
+      password = config[:password]
+    end
+
     hash = {
       hosts: [
         {
-          login: config[:username],
-          passcode: config[:password],
+          login: username,
+          passcode: password,
           host: config[:host],
           port: config[:port],
           ssl: config[:ssl]
@@ -86,11 +115,11 @@ class CheckRabbitStomp < Sensu::Plugin::Check::CLI
       conn.subscribe("/queue/#{config[:queue]}") do |_msg|
       end
       { 'status' => 'ok', 'message' => 'RabbitMQ server is alive' }
-     rescue Errno::ECONNREFUSED
-       { 'status' => 'critical', 'message' => 'TCP connection refused' }
-     rescue Stomp::Error::BrokerException => e
-       { 'status' => 'critical', 'message' => "Error from broker. Check auth details? #{e.message}" }
-    rescue => e
+    rescue Errno::ECONNREFUSED
+      { 'status' => 'critical', 'message' => 'TCP connection refused' }
+    rescue Stomp::Error::BrokerException => e
+      { 'status' => 'critical', 'message' => "Error from broker. Check auth details? #{e.message}" }
+    rescue StandardError => e
       { 'status' => 'unknown', 'message' => "#{e.class}: #{e.message}" }
     end
   end

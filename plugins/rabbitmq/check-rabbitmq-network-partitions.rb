@@ -1,24 +1,33 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
+
 #
 # RabbitMQ Network Partitions Check
 # ===
 #
+# DESCRIPTION:
 # This plugin checks if a RabbitMQ network partition has occured.
 # https://www.rabbitmq.com/partitions.html
 #
-# DEPENDENCIES:
-# gem: sensu-plugin
-# gem: carrot-top
+# PLATFORMS:
+#   Linux, BSD, Solaris
 #
+# DEPENDENCIES:
+#   RabbitMQ rabbitmq_management plugin
+#   gem: sensu-plugin
+#   gem: carrot-top
+#
+# LICENSE:
 # Copyright 2015 Ed Robinson <ed@reevoo.com> and Reevoo LTD.
 #
 # Released under the same terms as Sensu (the MIT license); see LICENSE
 # for details.
 
-require 'rubygems' if RUBY_VERSION < '1.9.0'
 require 'sensu-plugin/check/cli'
 require 'carrot-top'
+require 'inifile'
 
+# main plugin class
 class CheckRabbitMQPartitions < Sensu::Plugin::Check::CLI
   option :host,
          description: 'RabbitMQ management API host',
@@ -33,13 +42,13 @@ class CheckRabbitMQPartitions < Sensu::Plugin::Check::CLI
          default: 15_672
 
   option :username,
-         description: 'RabbitMQ username',
+         description: 'RabbitMQ management API user',
          short: '-u',
          long: '--username USERNAME',
          default: 'guest'
 
   option :password,
-         description: 'RabbitMQ password',
+         description: 'RabbitMQ management API password',
          short: '-p',
          long: '--password PASSWORD',
          default: 'guest'
@@ -50,12 +59,17 @@ class CheckRabbitMQPartitions < Sensu::Plugin::Check::CLI
          boolean: true,
          default: false
 
+  option :ini,
+         description: 'Configuration ini file',
+         short: '-i',
+         long: '--ini VALUE'
+
   def run
     critical 'network partition detected' if partition?
     ok 'no network partition detected'
   rescue Errno::ECONNREFUSED => e
     critical e.message
-  rescue => e
+  rescue StandardError => e
     unknown e.message
   end
 
@@ -64,11 +78,21 @@ class CheckRabbitMQPartitions < Sensu::Plugin::Check::CLI
   end
 
   def rabbitmq_management
+    if config[:ini]
+      ini = IniFile.load(config[:ini])
+      section = ini['auth']
+      username = section['username']
+      password = section['password']
+    else
+      username = config[:username]
+      password = config[:password]
+    end
+
     CarrotTop.new(
       host: config[:host],
       port: config[:port],
-      user: config[:username],
-      password: config[:password],
+      user: username,
+      password: password,
       ssl: config[:ssl]
     )
   end
