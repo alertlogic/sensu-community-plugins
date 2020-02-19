@@ -3,8 +3,6 @@
 # Evaluate free system memory from Linux based systems based on percentage
 # This was forked from Sensu Community Plugins
 #
-# Requires: bc
-#
 # Date: 2007-11-12
 # Author: Thomas Borger - ESG
 # Date: 2012-04-02
@@ -13,6 +11,11 @@
 # Modified: Mario Harvey - Zumetrics
 # Date: 2015-01-10
 # Modified Ollie Armstrong <ollie@armstrong.io>
+# Date: 2016-02-15
+# Modified: J. Brandt Buckley <brandt.buckley@sendgrid.com>
+
+# set lang
+LANG=C
 
 # get arguments
 
@@ -42,15 +45,20 @@ if [ "$hlp" = "yes" ]; then
   exit 0
 fi
 
-WARN=${WARN:=0}
-CRIT=${CRIT:=0}
+WARN=${WARN:=80}
+CRIT=${CRIT:=90}
 
 #Get total memory available on machine
 TotalMem=$(free -m | grep Mem | awk '{ print $2 }')
 #Determine amount of free memory on the machine
+set -o pipefail
 FreeMem=$(free -m | grep buffers/cache | awk '{ print $4 }')
+if [ $? -ne 0 ];
+  then
+  FreeMem=$(free -m | grep Mem | awk '{ print $7 }')
+fi
 #Get percentage of free memory
-FreePer=$(echo "scale=3; $FreeMem / $TotalMem * 100" | bc -l| cut -d "." -f1)
+FreePer=$(awk -v total="$TotalMem" -v free="$FreeMem" 'BEGIN { printf("%-10f\n", (free / total) * 100) }' | cut -d. -f1)
 #Get actual memory usage percentage by subtracting free memory percentage from 100
 UsedPer=$((100-$FreePer))
 
@@ -61,7 +69,7 @@ if [ "$UsedPer" = "" ]; then
 fi
 
 if [ "$perform" = "yes" ]; then
-  output="system memory usage: $UsedPer% | free memory="$UsedPer"MB;$WARN;$CRIT;0"
+  output="system memory usage: $UsedPer% | free memory="$UsedPer"%;$WARN;$CRIT;0"
 else
   output="system memory usage: $UsedPer%"
 fi
