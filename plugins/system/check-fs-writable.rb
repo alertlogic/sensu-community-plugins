@@ -62,7 +62,7 @@ class CheckFSWritable < Sensu::Plugin::Check::CLI
   end
 
   def acquire_mnt_pts
-    `grep VolGroup /proc/self/mounts | awk '{print $2, $4}' | awk -F, '{print $1}' | awk '{print $1, $2}'`
+    `grep -E '( xfs | ext[[:digit:]] )' /proc/self/mounts | awk '{print $2, $4}' | awk -F, '{print $1}' | awk '{print $1, $2}'`
   end
 
   def rw_in_proc?(mount_info)
@@ -114,7 +114,7 @@ class CheckFSWritable < Sensu::Plugin::Check::CLI
   end
 
   def run
-    (auto_discover if config[:auto]) || (manual_test if config[:dir]) || (warning 'No directorties to check')
+    (auto_discover if config[:auto]) || (manual_test if config[:dir])
     usage_summary
   end
 end
